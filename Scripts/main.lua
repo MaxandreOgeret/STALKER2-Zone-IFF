@@ -6,10 +6,13 @@
 -- against the game thread. Only widget creation goes through
 -- ExecuteInGameThread. The game has no per-frame Blueprint function to hook.
 
-local VERSION = "1.0.1"
+local VERSION = "1.1.0"
 
 local UEHelpers = require("UEHelpers")
 local FactionReader = require("FactionReader")
+local okConfig, Config = pcall(require, "ZoneIFFConfig")
+local FOE_MARKER = not (okConfig and type(Config) == "table"
+    and Config.FoeMarker == false)
 
 local GetPlayerController = UEHelpers.GetPlayerController
 local GetKismetSystemLibrary = UEHelpers.GetKismetSystemLibrary
@@ -409,7 +412,7 @@ local function Tick(Time)
             })
         end)
     end
-    return Relation == RELATION_ENEMY, Text ~= nil
+    return FOE_MARKER and Relation == RELATION_ENEMY, Text ~= nil
 end
 
 local function Update()

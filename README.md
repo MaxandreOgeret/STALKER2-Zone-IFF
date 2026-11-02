@@ -20,6 +20,10 @@ The faction comes from the game's memory, not from the outfit. Monolith in Loner
 
 Copy the `ZoneIFF` folder into `Stalker2/Binaries/Win64/ue4ss/Mods/`. If it does not load, add `ZoneIFF : 1` to `ue4ss/Mods/mods.txt`.
 
+## Config
+
+To hide the red X, set `FoeMarker = false` in `Scripts/ZoneIFFConfig.lua`.
+
 ## Compatibility
 
 Memory offsets are tied to one game build. After a patch the faction label turns off and the X keeps working.
