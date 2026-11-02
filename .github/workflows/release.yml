@@ -1,0 +1,43 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check version
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          grep -q "local VERSION = \"$v\"" Scripts/main.lua \
+            || { echo "Tag $GITHUB_REF_NAME does not match VERSION in main.lua"; exit 1; }
+          echo "VERSION=$v" >> "$GITHUB_ENV"
+
+      - name: Build zip
+        run: |
+          mkdir -p dist/ZoneIFF
+          cp -r Scripts enabled.txt LICENSE README.md dist/ZoneIFF/
+          cd dist && zip -r "ZoneIFF-$VERSION.zip" ZoneIFF
+
+      - name: GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" "dist/ZoneIFF-$VERSION.zip" --generate-notes
+
+      # Needs secret NEXUSMODS_API_KEY and variable NEXUS_FILE_ID.
+      - name: Nexus Mods upload
+        if: vars.NEXUS_FILE_ID != ''
+        uses: Nexus-Mods/upload-action@98532f7670c27cbecc78fae03fa3e278147827e2 # v1.0.0-beta.11
+        with:
+          api_key: ${{ secrets.NEXUSMODS_API_KEY }}
+          file_id: ${{ vars.NEXUS_FILE_ID }}
+          filename: dist/ZoneIFF-${{ env.VERSION }}.zip
+          version: ${{ env.VERSION }}
+          display_name: Zone IFF
