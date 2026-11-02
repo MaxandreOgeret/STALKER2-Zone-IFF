@@ -41,3 +41,4 @@ jobs:
           filename: dist/ZoneIFF-${{ env.VERSION }}.zip
           version: ${{ env.VERSION }}
           display_name: Zone IFF
+          update_mod_version: true
