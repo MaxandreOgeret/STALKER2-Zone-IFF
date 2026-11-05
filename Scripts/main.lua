@@ -2,9 +2,8 @@
 -- Copyright (C) 2026 Maxandre Ogeret
 -- SPDX-License-Identifier: GPL-3.0-or-later
 
--- Everything runs in one LoopAsync loop, on a UE4SS thread with no lock
--- against the game thread. Only widget creation goes through
--- ExecuteInGameThread. The game has no per-frame Blueprint function to hook.
+-- Everything runs in one game thread loop: widgets and engine calls are not
+-- thread safe. The game has no per-frame Blueprint function to hook.
 
 local VERSION = "1.1.0"
 
@@ -80,7 +79,6 @@ local LabelShown = false
 local Offset = { X = 0.0, Y = 0.0 }
 local LastHUDCheck = -1.0
 local LastLookup = -1.0
-local WidgetsPending = false
 -- Cleared when the relation changes, so a new target never shows the old name.
 local LabelText = nil
 local LastRelation = nil
@@ -91,6 +89,10 @@ local LoggedNPCs = {}
 local ShowCount = 0
 local LoggedErrors = {}
 local LogCount = 0
+-- Looked up again only when invalid.
+local CachedController = nil
+local Layout = nil
+local AgentClass = nil
 
 local function Log(Text)
     if LogCount < LOG_LIMIT then
@@ -163,7 +165,7 @@ local function AddCentered(Root, Widget)
     Slot:SetVerticalAlignment(2) -- VAlign_Center
 end
 
--- Game thread only: texture import is not thread safe.
+-- Texture import is not thread safe: call from the game thread.
 local function CreateWidgets(HUD)
     local Tree = HUD.WidgetTree
     if not IsValid(Tree) then
@@ -224,11 +226,15 @@ local function Now()
 end
 
 local function EnsureWidgets(Time)
-    if IsValid(Marker) and IsValid(Label) and IsValid(WidgetHUD)
-    and Time - LastHUDCheck < HUD_CHECK_INTERVAL then
+    local Ready = IsValid(Marker) and IsValid(Label) and IsValid(WidgetHUD)
+    if Ready and Time - LastHUDCheck < HUD_CHECK_INTERVAL then
         return true
     end
     LastHUDCheck = Time
+    -- FindAllOf stalls the game thread: scan only once our HUD is gone.
+    if Ready and Try(WidgetHUD.IsInViewport, WidgetHUD) then
+        return true
+    end
 
     local HUD = FindActiveHUD()
     if not HUD then
@@ -241,30 +247,35 @@ local function EnsureWidgets(Time)
     end
 
     Marker, Label, WidgetHUD = nil, nil, nil
-    if WidgetsPending then
-        return false
+    local ok, Image, Text = pcall(CreateWidgets, HUD)
+    if not ok then
+        LogOnce("create", "create error: " .. tostring(Image))
+    elseif Image then
+        Marker, Label, WidgetHUD = Image, Text, HUD
+        CachedController = Try(HUD.GetOwningPlayer, HUD)
+        MarkerShown, LabelShown = false, false
+        DrawnText, DrawnRelation = nil, nil
     end
-    WidgetsPending = true
-    ExecuteInGameThread(function()
-        local ok, Image, Text = pcall(CreateWidgets, HUD)
-        if not ok then
-            LogOnce("create", "create error: " .. tostring(Image))
-        elseif Image then
-            Marker, Label, WidgetHUD = Image, Text, HUD
-            MarkerShown, LabelShown = false, false
-            DrawnText, DrawnRelation = nil, nil
-        end
-        WidgetsPending = false
-    end)
     return false
+end
+
+-- Set from the HUD's owner on each new HUD: a map load can free the old
+-- controller without it ever reading as invalid. UEHelpers runs FindAllOf.
+local function PlayerController()
+    if not IsValid(CachedController) then
+        CachedController = GetPlayerController()
+    end
+    return CachedController
 end
 
 -- Screen offset of the weapon aim point. Follows sway when aiming down
 -- sights.
 local function AimOffset(Controller, Pawn)
-    local Layout = StaticFindObject("/Script/UMG.Default__WidgetLayoutLibrary")
     if not IsValid(Layout) then
-        return nil
+        Layout = StaticFindObject("/Script/UMG.Default__WidgetLayoutLibrary")
+        if not IsValid(Layout) then
+            return nil
+        end
     end
     local Aim = Pawn:GetAimTransform(true)
     local T, Q = Aim.Translation, Aim.Rotation
@@ -307,14 +318,16 @@ end
 -- The hit component's owner chain, up to the first Agent. A held weapon is
 -- owned by the NPC holding it.
 local function OwningAgent(Component)
-    local Agent = StaticFindObject("/Script/Stalker2.Agent")
+    if not IsValid(AgentClass) then
+        AgentClass = StaticFindObject("/Script/Stalker2.Agent")
+    end
     local Object = Component
     for _ = 1, 3 do
         Object = IsValid(Object) and Try(Object.GetOwner, Object)
         if not IsValid(Object) then
             return nil
         end
-        if Try(Object.IsA, Object, Agent) then
+        if Try(Object.IsA, Object, AgentClass) then
             return Object
         end
     end
@@ -346,7 +359,7 @@ local function TraceNPC(Controller, Pawn)
 end
 
 local function LookupFaction(Relation)
-    local Controller = GetPlayerController()
+    local Controller = PlayerController()
     if not IsValid(Controller) or not IsValid(Controller.Pawn) then
         return
     end
@@ -370,7 +383,7 @@ local function LookupFaction(Relation)
 end
 
 local function Tick(Time)
-    local Controller = GetPlayerController()
+    local Controller = PlayerController()
     if not IsValid(Controller) then
         return false, false
     end
@@ -452,12 +465,21 @@ end
 
 FactionReader.Init(Log)
 
-LoopAsync(TICK_MS, function()
+print("[ZoneIFF] " .. VERSION .. " loaded (built for game build 26123434, update 2.1)\n")
+
+local function Step()
     local ok, Err = pcall(Update)
     if not ok then
         LogOnce("update", "update error: " .. tostring(Err))
     end
-    return false
-end)
+end
 
-print("[ZoneIFF] " .. VERSION .. " loaded (built for game build 26123434, update 2.1)\n")
+-- Widgets and engine calls are only safe on the game thread, so there is no
+-- LoopAsync fallback.
+if EngineTickAvailable and pcall(LoopInGameThreadAfterFrames, 1, Step) then
+    Log("loop: game thread, every frame")
+elseif pcall(LoopInGameThreadWithDelay, TICK_MS, Step) then
+    Log("loop: game thread, every " .. TICK_MS .. " ms")
+else
+    Log("not started: this UE4SS build has no LoopInGameThreadWithDelay")
+end
