@@ -5,13 +5,18 @@
 -- Everything runs in one game thread loop: widgets and engine calls are not
 -- thread safe. The game has no per-frame Blueprint function to hook.
 
-local VERSION = "1.1.1"
+local VERSION = "1.2.0"
 
 local UEHelpers = require("UEHelpers")
 local FactionReader = require("FactionReader")
 local okConfig, Config = pcall(require, "ZoneIFFConfig")
-local FOE_MARKER = not (okConfig and type(Config) == "table"
-    and Config.FoeMarker == false)
+-- Only an explicit false disables a key.
+local function Enabled(Key)
+    return not (okConfig and type(Config) == "table" and Config[Key] == false)
+end
+local FOE_MARKER = Enabled("FoeMarker")
+local LABEL = Enabled("Label")
+local CROSSHAIR_COLOR = Enabled("CrosshairColor")
 
 local GetPlayerController = UEHelpers.GetPlayerController
 local GetKismetSystemLibrary = UEHelpers.GetKismetSystemLibrary
@@ -40,6 +45,10 @@ local RelationColors = {
     [2] = { R = 1.00, G = 0.82, B = 0.10, A = 1.0 },
     [3] = { R = 0.20, G = 1.00, B = 0.20, A = 1.0 }
 }
+local WHITE = { R = 1.0, G = 1.0, B = 1.0, A = 1.0 }
+-- Image properties of a crosshair variant. Some variants lack some.
+local CROSSHAIR_IMAGES = { "Point", "circle", "DownLine", "LeftLine",
+    "RightLine", "UpLine" }
 
 -- Faction SID to in-game name. Unknown SIDs show raw.
 local FactionNames = {
@@ -93,6 +102,9 @@ local LogCount = 0
 local CachedController = nil
 local Layout = nil
 local AgentClass = nil
+-- Images of the active crosshair variant, keyed on its address.
+local CrosshairVariant = nil
+local CrosshairImages = {}
 
 local function Log(Text)
     if LogCount < LOG_LIMIT then
@@ -255,6 +267,7 @@ local function EnsureWidgets(Time)
         CachedController = Try(HUD.GetOwningPlayer, HUD)
         MarkerShown, LabelShown = false, false
         DrawnText, DrawnRelation = nil, nil
+        CrosshairVariant, CrosshairImages = nil, {}
     end
     return false
 end
@@ -428,6 +441,37 @@ local function Tick(Time)
     return FOE_MARKER and Relation == RELATION_ENEMY, Text ~= nil
 end
 
+-- Colors the game's crosshair. Writes every frame: the game can reset it.
+local function ColorCrosshair(Relation)
+    local Variant = WidgetHUD.Crosshair.CurrCrosshairWidget
+    if not IsValid(Variant) then
+        return
+    end
+    local Key = Address(Variant)
+    local Stale = Key ~= CrosshairVariant
+    if not Stale then
+        for _, Image in ipairs(CrosshairImages) do
+            if not IsValid(Image) then
+                Stale = true
+                break
+            end
+        end
+    end
+    if Stale then
+        CrosshairVariant, CrosshairImages = Key, {}
+        for _, Name in ipairs(CROSSHAIR_IMAGES) do
+            local Image = Try(function() return Variant[Name] end)
+            if IsValid(Image) then
+                table.insert(CrosshairImages, Image)
+            end
+        end
+    end
+    local Color = RelationColors[Relation] or WHITE
+    for _, Image in ipairs(CrosshairImages) do
+        pcall(function() Image:SetColorAndOpacity(Color) end)
+    end
+end
+
 local function Update()
     local Time = Now()
     local okWidgets, Ready = pcall(EnsureWidgets, Time)
@@ -451,9 +495,15 @@ local function Update()
         SetVisible(Label, ShowLabel)
         LabelShown = ShowLabel
     end
+    if CROSSHAIR_COLOR then
+        local okColor, Err = pcall(ColorCrosshair, LastRelation)
+        if not okColor then
+            LogOnce("crosshair", "crosshair error: " .. tostring(Err))
+        end
+    end
     -- The trace is slow: run it after the widget update, every
-    -- LOOKUP_INTERVAL.
-    if LastRelation ~= nil and LastRelation ~= NO_TARGET
+    -- LOOKUP_INTERVAL. It only feeds the label.
+    if LABEL and LastRelation ~= nil and LastRelation ~= NO_TARGET
     and Time - LastLookup >= LOOKUP_INTERVAL then
         LastLookup = Time
         local okLookup, Err = pcall(LookupFaction, LastRelation)

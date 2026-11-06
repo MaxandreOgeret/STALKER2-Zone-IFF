@@ -22,7 +22,13 @@ Copy the `ZoneIFF` folder into `Stalker2/Binaries/Win64/ue4ss/Mods/`. If it does
 
 ## Config
 
-To hide the red X, set `FoeMarker = false` in `Scripts/ZoneIFFConfig.lua`.
+Keys in `Scripts/ZoneIFFConfig.lua`:
+
+- `FoeMarker = false` hides the red X.
+- `Label = false` hides the faction label.
+- `CrosshairColor = false` stops coloring the game's crosshair by relation.
+
+With `CrosshairColor` on, turn off the game's own "Crosshair Color" option in the interface settings, or both will color the crosshair.
 
 ## Compatibility
 
