@@ -5,7 +5,7 @@
 -- Everything runs in one game thread loop: widgets and engine calls are not
 -- thread safe. The game has no per-frame Blueprint function to hook.
 
-local VERSION = "1.1.0"
+local VERSION = "1.1.1"
 
 local UEHelpers = require("UEHelpers")
 local FactionReader = require("FactionReader")

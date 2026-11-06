@@ -14,7 +14,7 @@ The faction comes from the game's memory, not from the outfit. Monolith in Loner
 ## Requirements
 
 - Game update 2.1 (build 26123434)
-- UE4SS 3.0.1
+- UE4SS 3.0.1 experimental build from 2026 or later
 
 ## Install
 
