@@ -5,7 +5,7 @@
 -- Everything runs in one game thread loop: widgets and engine calls are not
 -- thread safe. The game has no per-frame Blueprint function to hook.
 
-local VERSION = "1.2.0"
+local VERSION = "1.2.1"
 
 local UEHelpers = require("UEHelpers")
 local FactionReader = require("FactionReader")
@@ -382,7 +382,8 @@ local function LookupFaction(Relation)
     end
     local SID, Detail = FactionReader.Faction(NPC)
     -- A failed read clears the label.
-    LabelText = SID and (FactionNames[SID] or SID) or nil
+    -- Boss fights use their own faction, e.g. ScarBoss_Faction shows as Scar.
+    LabelText = SID and (FactionNames[SID] or (SID:gsub("Boss_Faction$", ""))) or nil
     local Key = Address(NPC)
     if Key and not LoggedNPCs[Key] then
         LoggedNPCs[Key] = true
