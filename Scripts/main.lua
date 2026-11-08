@@ -5,7 +5,7 @@
 -- Everything runs in one game thread loop: widgets and engine calls are not
 -- thread safe. The game has no per-frame Blueprint function to hook.
 
-local VERSION = "1.2.1"
+local VERSION = "1.3.0"
 
 local UEHelpers = require("UEHelpers")
 local FactionReader = require("FactionReader")
@@ -74,6 +74,27 @@ local FactionNames = {
     MALACHITE_Scientist = "Scientists"
 }
 
+-- Game.locres namespace. Faction keys are sid_misc_answer_faction_<SID>.
+local LOC_NAMESPACE = "ST_S2BaseGameLocalization"
+-- Quote marks stripped from both ends of game text: " « » „ “ ”.
+local QUOTES = { '"', "\194\171", "\194\187", "\226\128\158", "\226\128\156", "\226\128\157" }
+-- Boss fights use their own faction: show the boss's name.
+local BossKeys = {
+    ScarBoss_Faction = "sid_character_sram_0",
+    StrelokBoss_Faction = "sid_character_strelok_0",
+    KorshunovBoss_Faction = "sid_character_polkovnik_korsunov_0"
+}
+-- Sub-factions that share a core faction's name.
+local CoreFaction = {
+    IkarVarta = "Varta",
+    EnemyVarta = "Varta",
+    SultanBandits = "Bandits",
+    NeutralBandits = "Bandits",
+    NeutralMSOP = "Militaries",
+    SIRCAA_Scientist = "Scientists",
+    MALACHITE_Scientist = "Scientists"
+}
+
 local VIS_SHOWN = 0 -- ESlateVisibility::Visible
 local VIS_HIDDEN = 2 -- ESlateVisibility::Hidden
 local MARKER_FILE = "FoeMarker.png"
@@ -101,6 +122,12 @@ local LogCount = 0
 -- Looked up again only when invalid.
 local CachedController = nil
 local Layout = nil
+local TextLibrary = nil
+local Intl = nil
+-- Game text per SID, false when missing. Cleared when the language changes.
+local GameNames = {}
+local GameNamesLanguage = nil
+local GameTextOn = true
 local AgentClass = nil
 -- Images of the active crosshair variant, keyed on its address.
 local CrosshairVariant = nil
@@ -126,8 +153,21 @@ local function Try(Fn, ...)
     return ok and Result or nil
 end
 
+-- UE4SS hands strings back as Lua strings or as FString/FText objects.
+local function AsString(Value)
+    return type(Value) == "string" and Value or Value:ToString()
+end
+
 local function IsValid(Object)
     return Object and Try(Object.IsValid, Object) == true or false
+end
+
+-- The game's text language, e.g. "uk", or nil.
+local function CurrentLanguage()
+    if not IsValid(Intl) then
+        Intl = StaticFindObject("/Script/Engine.Default__KismetInternationalizationLibrary")
+    end
+    return IsValid(Intl) and Try(function() return AsString(Intl:GetCurrentLanguage()) end) or nil
 end
 
 local function FullName(Object)
@@ -223,6 +263,7 @@ local function CreateWidgets(HUD)
     AddCentered(Root, Image)
     AddCentered(Root, Text)
     Log("widgets created on " .. FullName(Root))
+    Log("language=" .. tostring(CurrentLanguage()))
     return Image, Text
 end
 
@@ -371,6 +412,42 @@ local function TraceNPC(Controller, Pawn)
     return OwningAgent(Try(function() return Hit.Component:Get() end))
 end
 
+-- The game's name in its text language, else the English table.
+local function LocalizedName(SID)
+    local Language = CurrentLanguage()
+    if Language ~= GameNamesLanguage then
+        GameNames, GameNamesLanguage = {}, Language
+    end
+    if GameNames[SID] == nil and GameTextOn then
+        if not IsValid(TextLibrary) then
+            TextLibrary = StaticFindObject("/Script/Engine.Default__KismetTextLibrary")
+        end
+        local Key = BossKeys[SID] or "sid_misc_answer_faction_" .. (CoreFaction[SID] or SID)
+        -- Returns a bool and writes OutText into the table.
+        local Out = {}
+        local ok, Found = pcall(function()
+            return TextLibrary:FindTextInLocalizationTable(LOC_NAMESPACE, Key, Out, "")
+        end)
+        local Name = ok and Found and Out.OutText and Try(AsString, Out.OutText)
+        if type(Name) == "string" then
+            -- Some languages quote faction names in this dialog text.
+            for _, Q in ipairs(QUOTES) do
+                Name = Name:gsub("^" .. Q, ""):gsub(Q .. "$", "")
+            end
+        end
+        if not ok then
+            -- UE4SS builds before 2026-10-09 fail on this call (RE-UE4SS #1454).
+            GameTextOn = false
+            Log("game text off: " .. tostring(Found):match("[^\n]*"))
+        elseif type(Name) ~= "string" or Name == "" then
+            Log("no game text for " .. Key)
+        end
+        GameNames[SID] = type(Name) == "string" and Name ~= "" and Name or false
+    end
+    -- Boss fights use their own faction, e.g. ScarBoss_Faction shows as Scar.
+    return GameNames[SID] or FactionNames[SID] or (SID:gsub("Boss_Faction$", ""))
+end
+
 local function LookupFaction(Relation)
     local Controller = PlayerController()
     if not IsValid(Controller) or not IsValid(Controller.Pawn) then
@@ -382,8 +459,7 @@ local function LookupFaction(Relation)
     end
     local SID, Detail = FactionReader.Faction(NPC)
     -- A failed read clears the label.
-    -- Boss fights use their own faction, e.g. ScarBoss_Faction shows as Scar.
-    LabelText = SID and (FactionNames[SID] or (SID:gsub("Boss_Faction$", ""))) or nil
+    LabelText = SID and LocalizedName(SID) or nil
     local Key = Address(NPC)
     if Key and not LoggedNPCs[Key] then
         LoggedNPCs[Key] = true

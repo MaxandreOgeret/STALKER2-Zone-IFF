@@ -4,6 +4,8 @@ UE4SS Lua mod for S.T.A.L.K.E.R. 2. Aim at an NPC to see its faction, colored by
 
 The faction comes from the game's memory, not from the outfit. Monolith in Loner gear shows as Monolith.
 
+Names come from the game's own text, in the game's language. Bosses show their name. Arabic shows boxes: the label font has no Arabic glyphs.
+
 | Color  | Relation   |
 |--------|------------|
 | Red    | Enemy      |
@@ -14,7 +16,7 @@ The faction comes from the game's memory, not from the outfit. Monolith in Loner
 ## Requirements
 
 - Game update 2.1 (build 26123434)
-- UE4SS 3.0.1 experimental build from 2026 or later
+- UE4SS 3.0.1 experimental build from 2026 or later. Builds older than 2026-10-09 show English names.
 
 ## Install
 
